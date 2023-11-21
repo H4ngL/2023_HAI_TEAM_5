@@ -1,50 +1,43 @@
-"""Python file to serve as the frontend"""
 import streamlit as st
-from streamlit_chat import message
-import faiss
-from langchain import OpenAI
+from openai import OpenAI
 from langchain.chains import VectorDBQAWithSourcesChain
+import faiss
 import pickle
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
-# Load the LangChain.
-index = faiss.read_index("docs.index")
-
-with open("faiss_store.pkl", "rb") as f:
-    store = pickle.load(f)
-
-store.index = index
-chain = VectorDBQAWithSourcesChain.from_llm(llm=OpenAI(temperature=0), vectorstore=store)
-
-
-# From here down is all the StreamLit UI.
 st.set_page_config(page_title="HAI Notion QA Bot", page_icon=":robot:")
-st.header("HAI Notion QA Bot")
+st.title("HAI Notion QA Bot")
 
-if "generated" not in st.session_state:
-    st.session_state["generated"] = []
+client = OpenAI()
 
-if "past" not in st.session_state:
-    st.session_state["past"] = []
+if "openai_model" not in st.session_state:
+    st.session_state["openai_model"] = "gpt-3.5-turbo"
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-def get_text():
-    input_text = st.text_input("You: ", "Hello, how are you?", key="input")
-    return input_text
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
+if prompt := st.chat_input("What is up?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-user_input = get_text()
-
-if user_input:
-    result = chain({"question": user_input})
-    output = f"Answer: {result['answer']}\nSources: {result['sources']}"
-
-    st.session_state.past.append(user_input)
-    st.session_state.generated.append(output)
-
-if st.session_state["generated"]:
-
-    for i in range(len(st.session_state["generated"]) - 1, -1, -1):
-        message(st.session_state["generated"][i], key=str(i))
-        message(st.session_state["past"][i], is_user=True, key=str(i) + "_user")
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
+        for response in client.chat.completions.create(
+            model=st.session_state["openai_model"],
+            messages=[
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.messages
+            ],
+            stream=True,
+        ):
+            full_response += (response.choices[0].delta.content or "")
+            message_placeholder.markdown(full_response + "▌")
+        message_placeholder.markdown(full_response)
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
